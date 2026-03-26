@@ -1,4 +1,5 @@
 # arXivAlert
+![logo](templates/logo_smaller.png)
 
 AI-curated arXiv digests powered by Anthropic Claude. arXivAlert fetches recent papers from your chosen arXiv categories, scores them against your research interests in a two-step process (reducing token use), generates short summaries for the papers that pass your threshold, and can email the result as an HTML digest. It's designed to be run as a cron job for iterative scanning of new papers in your field of interest.
 
