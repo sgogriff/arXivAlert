@@ -1,0 +1,9 @@
+services:
+  arxivalert:
+    build: .
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./output:/app/output
+      - ./last_run.json:/app/last_run.json
+    restart: "no"

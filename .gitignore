@@ -1,0 +1,29 @@
+# Environment & Secrets
+.env
+config.yaml
+
+# Virtual environments
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Build & Distribution
+dist/
+build/
+
+# Application state & cache
+output/
+last_run.json
+paper_cache.json
+token_usage.json
+
+# OS
+.DS_Store
+
+# Documentation (local)
+CLAUDE.md

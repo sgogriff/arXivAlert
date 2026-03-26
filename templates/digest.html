@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>arXivAlert Digest</title>
+</head>
+	<body style="margin: 0; padding: 0; background-color: #f3f4f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+	  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f8;">
+	    <tr>
+	      <td align="center" style="padding: 24px 16px;">
+	        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.10);">
+
+	          <!-- Header -->
+	          <tr>
+	            <td style="background: linear-gradient(135deg, #0b1020 0%, #111a33 60%, #1d2550 100%); padding: 28px 32px; text-align: center;">
+	              <img src="{{ logo_src }}" alt="arXivAlert" style="display: block; margin: 0 auto; max-width: 240px; width: 100%; height: auto;">
+	              <p style="margin: 8px 0 0; color: #a0a0b8; font-size: 14px;">
+	                {{ start_date.strftime('%Y-%m-%d %H:%M UTC') }} &mdash; {{ end_date.strftime('%Y-%m-%d %H:%M UTC') }}
+	              </p>
+	            </td>
+	          </tr>
+
+	          <!-- Digest overview -->
+	          <tr>
+	            <td style="padding: 20px 32px; background-color: #f7f7ff; border-bottom: 1px solid #e6e8f2;">
+	              <p style="margin: 0; font-size: 14px; color: #333; line-height: 1.55;">
+	                {{ digest_overview if digest_overview else "Claude overview unavailable for this run." }}
+	              </p>
+	              <p style="margin: 10px 0 0; font-size: 12px; color: #666;">
+	                Token usage: <strong>{{ "{:,}".format(token_usage.input_tokens) }}</strong> in /
+	                <strong>{{ "{:,}".format(token_usage.output_tokens) }}</strong> out
+	                (total <strong>{{ "{:,}".format(token_usage.total_tokens) }}</strong>)
+	                {% if cost_gbp is not none and cost_eur is not none and cost_usd is not none %}
+	                  — approx. <strong>£{{ "%.4f"|format(cost_gbp) }}</strong> /
+	                  <strong>€{{ "%.4f"|format(cost_eur) }}</strong> /
+	                  <strong>${{ "%.4f"|format(cost_usd) }}</strong>
+	                {% else %}
+	                  — approx. cost unavailable
+	                {% endif %}
+	              </p>
+	            </td>
+	          </tr>
+
+	          <!-- Summary -->
+	          <tr>
+	            <td style="padding: 16px 32px; background-color: #f7f7ff; border-bottom: 1px solid #e6e8f2;">
+	              <p style="margin: 0; font-size: 14px; color: #555;">
+	                <strong>{{ papers | length }}</strong> relevant paper{{ 's' if papers | length != 1 else '' }} found
+	                {% if total_scanned %} from <strong>{{ total_scanned }}</strong> scanned{% endif %}
+	              </p>
+	            </td>
+	          </tr>
+
+          <!-- Papers -->
+          {% for item in papers %}
+	          <tr>
+	            <td style="padding: 22px 32px; border-bottom: 1px solid #eef0f6;">
+	              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+	                <tr>
+	                  <td width="110" valign="top" style="padding-right: 18px; text-align: center;">
+	                    <div style="font-size: 11px; color: #667085; font-weight: 600; margin: 0 0 6px;">
+	                      Relevance score:
+	                    </div>
+	                    {% if item.score >= 9 %}
+	                    <div style="width: 44px; height: 44px; border-radius: 50%; background-color: #22c55e; color: #ffffff; font-size: 18px; font-weight: 800; line-height: 44px; text-align: center; margin: 0 auto;">
+	                    {% elif item.score >= 7 %}
+	                    <div style="width: 44px; height: 44px; border-radius: 50%; background-color: #6366f1; color: #ffffff; font-size: 18px; font-weight: 800; line-height: 44px; text-align: center; margin: 0 auto;">
+	                    {% else %}
+	                    <div style="width: 44px; height: 44px; border-radius: 50%; background-color: #f59e0b; color: #ffffff; font-size: 18px; font-weight: 800; line-height: 44px; text-align: center; margin: 0 auto;">
+	                    {% endif %}
+	                      {{ item.score }}
+	                    </div>
+	                  </td>
+	                  <td valign="top">
+	                    <!-- Title -->
+	                    <a href="{{ item.paper.abs_url }}" style="color: #0f172a; font-size: 16px; font-weight: 650; text-decoration: none; line-height: 1.4;">
+	                      {{ item.paper.title }}
+	                    </a>
+
+                    <!-- Authors -->
+                    <p style="margin: 6px 0 0; font-size: 13px; color: #777;">
+                      {% if item.paper.authors | length > 3 %}
+                        {{ item.paper.authors[:3] | join(', ') }} et al.
+                      {% else %}
+                        {{ item.paper.authors | join(', ') }}
+                      {% endif %}
+                    </p>
+
+	                    <!-- Categories -->
+	                    <p style="margin: 6px 0 0;">
+	                      {% for cat in item.paper.categories[:4] %}
+	                      <span style="display: inline-block; background-color: #eef2ff; color: #3730a3; font-size: 11px; padding: 2px 8px; border-radius: 999px; margin-right: 6px;">{{ cat }}</span>
+	                      {% endfor %}
+	                    </p>
+
+                    <!-- Summary -->
+                    <p style="margin: 10px 0 0; font-size: 14px; color: #333; line-height: 1.5;">
+                      {{ item.summary }}
+                    </p>
+
+                    <!-- Relevance reason -->
+                    <p style="margin: 6px 0 0; font-size: 13px; color: #888; font-style: italic;">
+                      {{ item.relevance_reason }}
+                    </p>
+
+	                    <!-- arXiv link -->
+	                    <p style="margin: 8px 0 0;">
+	                      <a href="{{ item.paper.pdf_url }}" style="font-size: 12px; color: #4f46e5; text-decoration: none;">[PDF]</a>
+	                      <a href="{{ item.paper.abs_url }}" style="font-size: 12px; color: #4f46e5; text-decoration: none; margin-left: 8px;">[Abstract]</a>
+	                    </p>
+	                  </td>
+	                </tr>
+	              </table>
+	            </td>
+	          </tr>
+          {% endfor %}
+
+          <!-- Footer -->
+	          <tr>
+	            <td style="padding: 18px 32px; background-color: #fbfbfe; text-align: center;">
+	              <p style="margin: 0; font-size: 12px; color: #999;">
+	                Generated by <strong>arXivAlert</strong> on {{ generation_date.strftime('%d %b %Y at %H:%M UTC') }}
+	              </p>
+	            </td>
+	          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -1,0 +1,158 @@
+"""HTML digest generation from scored papers."""
+
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from src.scorer import ScoredPaper, TokenUsage
+
+logger = logging.getLogger("arXivAlert.formatter")
+
+
+def _get_template_dir() -> str:
+    """Resolve templates directory relative to project root."""
+    # Works whether run from project root or via python -m src.main
+    here = Path(__file__).resolve().parent.parent
+    return str(here / "templates")
+
+
+def _to_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def generate_digest(
+    scored_papers: list[ScoredPaper],
+    date_range: tuple[datetime, datetime],
+    output_dir: str,
+    total_scanned: int = 0,
+    digest_overview: str = "",
+    token_usage: TokenUsage | None = None,
+    cost_usd: float | None = None,
+    cost_gbp: float | None = None,
+    cost_eur: float | None = None,
+    model_name: str = "",
+) -> tuple[str, str]:
+    """Render HTML digest and save to output directory.
+
+    Returns (email_html_content, output_filepath).
+    """
+    env = Environment(
+        loader=FileSystemLoader(_get_template_dir()),
+        autoescape=select_autoescape(["html"]),
+    )
+    template = env.get_template("digest.html")
+
+    start_date, end_date = date_range
+    start_date = _to_utc(start_date)
+    end_date = _to_utc(end_date)
+    token_usage = token_usage or TokenUsage()
+
+    # Saved HTML should work in a browser: copy logo next to the digest and
+    # reference it by filename.
+    os.makedirs(output_dir, exist_ok=True)
+    logo_src_path = Path(_get_template_dir()) / "logo.png"
+    logo_dst_path = Path(output_dir) / "logo.png"
+    try:
+        if logo_src_path.exists() and not logo_dst_path.exists():
+            logo_dst_path.write_bytes(logo_src_path.read_bytes())
+    except OSError as e:
+        logger.warning("Could not copy logo to output directory: %s", e)
+
+    file_html = template.render(
+        papers=scored_papers,
+        start_date=start_date,
+        end_date=end_date,
+        generation_date=datetime.now(timezone.utc),
+        total_scanned=total_scanned,
+        digest_overview=digest_overview,
+        token_usage=token_usage,
+        cost_usd=cost_usd,
+        cost_gbp=cost_gbp,
+        cost_eur=cost_eur,
+        model_name=model_name,
+        logo_src="logo.png",
+    )
+
+    filename = f"digest_{end_date.strftime('%Y-%m-%d')}.html"
+    filepath = os.path.join(output_dir, filename)
+    Path(filepath).write_text(file_html, encoding="utf-8")
+
+    email_html = template.render(
+        papers=scored_papers,
+        start_date=start_date,
+        end_date=end_date,
+        generation_date=datetime.now(timezone.utc),
+        total_scanned=total_scanned,
+        digest_overview=digest_overview,
+        token_usage=token_usage,
+        cost_usd=cost_usd,
+        cost_gbp=cost_gbp,
+        cost_eur=cost_eur,
+        model_name=model_name,
+        logo_src="cid:arxivalert-logo",
+    )
+
+    logger.info("Digest saved to %s", filepath)
+    return email_html, filepath
+
+
+def generate_plain_text(
+    scored_papers: list[ScoredPaper],
+    date_range: tuple[datetime, datetime],
+    digest_overview: str = "",
+    token_usage: TokenUsage | None = None,
+    cost_usd: float | None = None,
+    cost_gbp: float | None = None,
+    cost_eur: float | None = None,
+    model_name: str = "",
+) -> str:
+    """Generate plain-text fallback for email."""
+    start_date, end_date = date_range
+    start_date = _to_utc(start_date)
+    end_date = _to_utc(end_date)
+    token_usage = token_usage or TokenUsage()
+    lines = [
+        "arXivAlert Digest",
+        f"{start_date.strftime('%Y-%m-%d %H:%M UTC')} — {end_date.strftime('%Y-%m-%d %H:%M UTC')}",
+        f"{len(scored_papers)} relevant paper(s)",
+        "",
+        digest_overview if digest_overview else "Claude overview unavailable for this run.",
+        "",
+        f"Token usage: {token_usage.input_tokens} in / {token_usage.output_tokens} out (total {token_usage.total_tokens})",
+        (
+            f"Approx. cost: £{cost_gbp:.4f} / €{cost_eur:.4f} / ${cost_usd:.4f}"
+            if cost_usd is not None and cost_gbp is not None and cost_eur is not None
+            else "Approx. cost: unavailable"
+        ),
+        "",
+        "=" * 60,
+    ]
+
+    for item in scored_papers:
+        authors = ", ".join(item.paper.authors[:3])
+        if len(item.paper.authors) > 3:
+            authors += " et al."
+
+        lines.extend([
+            "",
+            f"[{item.score}/10] {item.paper.title}",
+            f"  Authors: {authors}",
+            f"  {item.summary}",
+            f"  Relevance: {item.relevance_reason}",
+            f"  PDF: {item.paper.pdf_url}",
+            f"  Abstract: {item.paper.abs_url}",
+            "",
+            "-" * 60,
+        ])
+
+    lines.extend([
+        "",
+        f"Generated by arXivAlert on {datetime.now(timezone.utc).strftime('%d %b %Y at %H:%M UTC')}",
+    ])
+
+    return "\n".join(lines)
