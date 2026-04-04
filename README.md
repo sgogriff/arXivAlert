@@ -57,7 +57,7 @@ scoring:
   abstract_truncation_words: 150
 
 digest:
-  schedule: "weekly"
+  initial_search_window: "weekly"
   output_dir: "output"
   min_papers_to_email: 3
 ```
@@ -72,11 +72,11 @@ Config fields:
 - `scoring.batch_size`: pass-2 summarisation batch size.
 - `scoring.score_batch_size`: pass-1 scoring batch size.
 - `scoring.abstract_truncation_words`: abstract length used in pass 1.
-- `digest.schedule`: one of `daily`, `weekly`, `fortnightly`, `monthly`.
+- `digest.initial_search_window`: one of `daily`, `weekly`, `fortnightly`, `monthly`.
 - `digest.output_dir`: directory for saved HTML digests. It is created automatically.
 - `digest.min_papers_to_email`: minimum queued relevant papers required before generating/sending a digest.
 
-`digest.schedule` controls the initial lookback only when `last_run.json` is missing or unreadable:
+`digest.initial_search_window` controls the initial lookback only when `last_run.json` is missing or unreadable:
 
 - `daily`: 1 day
 - `weekly`: 7 days
@@ -259,7 +259,7 @@ Monthly on the 1st at 08:00:
 0 8 1 * * cd /path/to/arXivAlert && /path/to/arXivAlert/.venv/bin/python -m src.main >> /tmp/arxivalert.log 2>&1
 ```
 
-Keep `digest.schedule` aligned with how often you run the job, because it determines the fallback lookback when `last_run.json` is missing.
+Set `digest.initial_search_window` to the fallback lookback you want when `last_run.json` is missing.
 
 ## Docker
 
@@ -327,7 +327,7 @@ arXivAlert/
 
 - Check the category codes.
 - Increase `arxiv.max_results`.
-- On a first run, use a broader `digest.schedule` or `--forcemax`.
+- On a first run, use a broader `digest.initial_search_window` or `--forcemax`.
 
 ### Papers are found but no digest is generated
 

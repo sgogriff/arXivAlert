@@ -11,7 +11,7 @@ import arxiv
 
 logger = logging.getLogger("arXivAlert.fetcher")
 
-_SCHEDULE_LOOKBACK = {
+_INITIAL_SEARCH_WINDOW_LOOKBACK = {
     "daily": timedelta(days=1),
     "weekly": timedelta(days=7),
     "fortnightly": timedelta(days=14),
@@ -53,18 +53,20 @@ def save_last_run(timestamp: datetime, state_file: str = "last_run.json") -> Non
 
 
 def calculate_date_range(
-    schedule: str, last_run: datetime | None
+    initial_search_window: str, last_run: datetime | None
 ) -> tuple[datetime, datetime]:
-    """Determine fetch date range based on schedule and last run.
+    """Determine fetch date range based on initial window and last run.
 
     If last_run exists, use it as start. Otherwise fall back to
-    schedule-based lookback (1d / 7d / 14d).
+    initial-search-window lookback (1d / 7d / 14d / 30d).
     """
     now = datetime.now(timezone.utc)
     if last_run is not None:
         start = last_run
     else:
-        lookback = _SCHEDULE_LOOKBACK.get(schedule, timedelta(days=1))
+        lookback = _INITIAL_SEARCH_WINDOW_LOOKBACK.get(
+            initial_search_window, timedelta(days=1)
+        )
         start = now - lookback
     return (start, now)
 

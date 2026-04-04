@@ -82,7 +82,7 @@ def main() -> int:
         logger.info("--forcemax: ignoring last_run.json, looking back 365 days")
     else:
         last_run = load_last_run()
-        date_range = calculate_date_range(config.digest.schedule, last_run)
+        date_range = calculate_date_range(config.digest.initial_search_window, last_run)
     logger.info(
         "Fetching papers from %s to %s",
         date_range[0].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),

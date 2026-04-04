@@ -29,6 +29,6 @@ scoring:
   abstract_truncation_words: 150     # Pass 1: max abstract words sent to Claude
 
 digest:
-  schedule: "weekly"                 # daily | weekly | fortnightly | monthly
+  initial_search_window: "weekly"    # daily | weekly | fortnightly | monthly
   output_dir: "output"               # Where to save HTML digests
   min_papers_to_email: 3             # Only email once at least N papers are ready

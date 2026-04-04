@@ -24,7 +24,7 @@ class ScoringConfig:
 
 @dataclass
 class DigestConfig:
-    schedule: str = "daily"
+    initial_search_window: str = "daily"
     output_dir: str = "output"
     min_papers_to_email: int = 3
 
@@ -91,10 +91,13 @@ def load_config(config_path: str = "config.yaml", env_path: str = ".env") -> App
 
     # Parse digest section
     digest_raw = raw.get("digest", {})
-    schedule = digest_raw.get("schedule", "daily")
-    if schedule not in _VALID_SCHEDULES:
+    initial_search_window = digest_raw.get(
+        "initial_search_window", digest_raw.get("schedule", "daily")
+    )
+    if initial_search_window not in _VALID_SCHEDULES:
         raise ValueError(
-            f"config.yaml: digest.schedule must be one of {_VALID_SCHEDULES}, got '{schedule}'"
+            "config.yaml: digest.initial_search_window must be one of "
+            f"{_VALID_SCHEDULES}, got '{initial_search_window}'"
         )
     output_dir = digest_raw.get("output_dir", "output")
     min_papers_to_email = int(digest_raw.get("min_papers_to_email", 3))
@@ -102,7 +105,7 @@ def load_config(config_path: str = "config.yaml", env_path: str = ".env") -> App
         raise ValueError("config.yaml: digest.min_papers_to_email must be >= 1")
     os.makedirs(output_dir, exist_ok=True)
     digest_config = DigestConfig(
-        schedule=schedule,
+        initial_search_window=initial_search_window,
         output_dir=output_dir,
         min_papers_to_email=min_papers_to_email,
     )
