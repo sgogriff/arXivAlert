@@ -47,12 +47,12 @@ def send_digest(
     alt.attach(MIMEText(html_content, "html", "utf-8"))
     msg.attach(alt)
 
-    # Inline logo referenced by cid:arxivalert-logo
+    # Inline logo referenced by cid:paperpress-logo
     try:
         logo_path = _get_logo_path()
         if logo_path.exists():
             img = MIMEImage(logo_path.read_bytes())
-            img.add_header("Content-ID", "<arxivalert-logo>")
+            img.add_header("Content-ID", "<paperpress-logo>")
             img.add_header("Content-Disposition", "inline", filename="logo.png")
             msg.attach(img)
         else:

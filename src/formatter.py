@@ -290,7 +290,7 @@ def generate_digest(
         cost_gbp=cost_gbp,
         cost_eur=cost_eur,
         model_name=model_name,
-        logo_src="cid:arxivalert-logo",
+        logo_src="cid:paperpress-logo",
     )
 
     logger.info("Digest saved to %s", filepath)

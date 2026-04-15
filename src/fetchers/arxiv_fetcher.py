@@ -28,7 +28,7 @@ class ArxivFetcher:
         client = arxiv.Client(page_size=page_size, delay_seconds=5.0, num_retries=0)
         try:
             client._session.headers.update(  # type: ignore[attr-defined]
-                {"User-Agent": "PaperPress/1.0 (+https://github.com/sgogriff/arXivAlert)"}
+                {"User-Agent": "PaperPress/1.0 (+https://github.com/sgogriff/Paper-Press)"}
             )
         except Exception:
             logger.debug("Could not update arXiv client user-agent header")
