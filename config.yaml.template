@@ -1,34 +1,65 @@
-arxiv:
-  categories:              # arXiv category codes, see https://arxiv.org/archive
-    - "nucl-ex"            # Nuclear experiment
-    - "physics.ins-det"    # Instrumentation and detectors
-  max_results: 100         # Max papers to fetch per category
+sources:
+  arxiv:
+    enabled: true                    # Free arXiv API; best option for arXiv coverage
+    categories:                      # Required when arXiv is enabled
+      - "cs.LG"                      # Example: Machine Learning
+      - "cs.RO"                      # Example: Robotics
+    max_results: 100                 # Max papers fetched per category
 
-#  The below 'interests' field is a free-form text field that can be used to provide additional context to the scoring model. 
-#  It accepts natural language text and can be used to specify particular topics, techniques, or areas of interest that are relevant to the user.
-#  Hence, use the below field as a chance to tell what you are interested in, as if you were describing your interests to a colleague. 
+  biorxiv:
+    enabled: false                   # Native bioRxiv preprint feed
+    max_results: 200                 # Max preprints fetched per run
 
-interests: |               
-  I'm fascinated by the intersection of computer vision and robotics. My research focuses on 
-developing and refining machine learning-based methods for visual perception and control in 
-autonomous systems. Specifically, I'm interested in papers that explore; Visual odometry and 
-SLAM (Simultaneous Localization and Mapping) techniques for real-time navigation; Deep 
-learning architectures for object detection, tracking, and classification; Computer vision 
-applications in robotics, such as grasping, manipulation, and human-robot interaction; Robot 
-learning and imitation using vision-based feedback; Sensorimotor integration and planning 
-strategies for autonomous systems. I'm less interested in purely theoretical computer science 
-papers or those focused on specific robot platforms without broader applicability. 
-Additionally, I have a curiosity about applying AI to tackle complex societal challenges, such 
-as environmental monitoring or disaster response.
+  medrxiv:
+    enabled: false                   # Native medRxiv preprint feed
+    max_results: 200                 # Max preprints fetched per run
+
+  osf:
+    enabled: false                   # OSF-hosted preprints such as PsyArXiv / SocArXiv
+    max_results: 100                 # Max OSF preprints fetched per run
+    providers: []                    # Empty = all providers, else list provider slugs
+
+  europepmc:
+    enabled: false                   # Europe PMC preprints only in this version
+    max_results: 100                 # Max Europe PMC preprints fetched per run
+    extra_query: ""                  # Optional Europe PMC syntax to narrow results
+
+  zenodo:
+    enabled: false                   # Open-access Zenodo records
+    max_results: 100                 # Max Zenodo records fetched per run
+    communities: []                  # Empty = all communities, else community identifiers
+
+  openalex:
+    enabled: true                    # Published-work backbone; requires OPENALEX_API_KEY
+    max_results: 200                 # Max published works fetched per run
+    primary_topics: []               # Optional list of OpenAlex topic IDs, e.g. ["https://openalex.org/T11216", "https://openalex.org/T11044"]
+    journals: []                     # Optional list of OpenAlex source IDs, e.g. ["https://openalex.org/S145630073", "https://openalex.org/S14279044"]
+    institutions: []                 # Optional list of OpenAlex institution IDs, e.g. ["https://openalex.org/I67311998", "https://openalex.org/I148283060"]
+
+selection:
+  include_preprints: true            # Toggle preprints before scoring
+  include_published: true            # Toggle published work before scoring
+  content_scope: "articles_only"     # articles_only | articles_and_datasets | all_supported_types
+  version_preference: "prefer_published"  # prefer_published | prefer_newest | prefer_preprint | show_all
+  digest_view: "single_ranked"       # Current output mode; keep as single_ranked
+
+# Describe your interests as if you were briefing a colleague.
+# The model uses this text to score and summarise papers.
+interests: |
+  I'm interested in machine learning for robotics, embodied AI, and
+  perception-heavy autonomy. Prioritize papers on robot learning,
+  control, representation learning, multimodal reasoning, SLAM, and
+  real-world decision-making under uncertainty. I care more about
+  methods, evaluation, and systems results than purely abstract theory.
 
 scoring:
-  model: "claude-sonnet-4-20250514"   # Claude model to use
-  threshold: 7                       # Minimum relevance score (1-10)
+  model: "claude-sonnet-4-20250514"  # Claude model for scoring and summaries
+  threshold: 7                       # Minimum relevance score (1-10) to keep a paper
   batch_size: 8                      # Pass 2: papers per summarisation call
   score_batch_size: 24               # Pass 1: papers per scoring-only call
   abstract_truncation_words: 150     # Pass 1: max abstract words sent to Claude
 
 digest:
   initial_search_window: "weekly"    # daily | weekly | fortnightly | monthly
-  output_dir: "output"               # Where to save HTML digests
-  min_papers_to_email: 3             # Only email once at least N papers are ready
+  output_dir: "output"               # Where HTML digests are written
+  min_papers_to_email: 3             # Queue papers until at least N are ready

@@ -1,10 +1,10 @@
-"""Claude API scoring and summarisation of arXiv papers."""
+"""Claude API scoring and summarisation of research papers."""
 
 import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from random import random
@@ -15,13 +15,13 @@ from tqdm import tqdm
 from src.config import AppConfig
 from src.fetcher import Paper
 
-logger = logging.getLogger("arXivAlert.scorer")
+logger = logging.getLogger("paperpress.scorer")
 
 CACHE_FILE = "paper_cache.json"
 
 SYSTEM_PROMPT_SCORE = """\
 You are a research paper relevance scorer. You will be given a list of \
-arXiv paper titles and truncated abstracts, along with the user's research interests. \
+research paper titles and truncated abstracts, along with the user's research interests. \
 For each paper, assess its relevance to the user's interests.
 
 Scoring guidelines:
@@ -40,7 +40,7 @@ Each object must have exactly these fields:
 
 SYSTEM_PROMPT_SUMMARISE = """\
 You are a research paper summariser. You will be given a list of \
-arXiv paper abstracts that have already been identified as relevant, \
+research paper abstracts that have already been identified as relevant, \
 along with the user's research interests. For each paper, provide:
 
 - A 2-3 sentence plain-English summary of the paper's contribution
@@ -82,15 +82,30 @@ class TokenUsage:
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    cache_creation_ephemeral_5m_input_tokens: int = 0
+    cache_creation_ephemeral_1h_input_tokens: int = 0
 
     @classmethod
     def from_message(cls, message: object) -> "TokenUsage":
         usage = getattr(message, "usage", None)
+        cache_creation = getattr(usage, "cache_creation", None)
+        cache_creation_5m = int(
+            getattr(cache_creation, "ephemeral_5m_input_tokens", 0) or 0
+        )
+        cache_creation_1h = int(
+            getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
+        )
+        cache_creation_total = int(
+            getattr(usage, "cache_creation_input_tokens", 0)
+            or (cache_creation_5m + cache_creation_1h)
+        )
         return cls(
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
-            cache_creation_input_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+            cache_creation_input_tokens=cache_creation_total,
             cache_read_input_tokens=int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            cache_creation_ephemeral_5m_input_tokens=cache_creation_5m,
+            cache_creation_ephemeral_1h_input_tokens=cache_creation_1h,
         )
 
     def add(self, other: "TokenUsage") -> None:
@@ -98,6 +113,12 @@ class TokenUsage:
         self.output_tokens += other.output_tokens
         self.cache_creation_input_tokens += other.cache_creation_input_tokens
         self.cache_read_input_tokens += other.cache_read_input_tokens
+        self.cache_creation_ephemeral_5m_input_tokens += (
+            other.cache_creation_ephemeral_5m_input_tokens
+        )
+        self.cache_creation_ephemeral_1h_input_tokens += (
+            other.cache_creation_ephemeral_1h_input_tokens
+        )
 
     @classmethod
     def from_dict(cls, data: dict) -> "TokenUsage":
@@ -106,6 +127,12 @@ class TokenUsage:
             output_tokens=int(data.get("output_tokens", 0) or 0),
             cache_creation_input_tokens=int(data.get("cache_creation_input_tokens", 0) or 0),
             cache_read_input_tokens=int(data.get("cache_read_input_tokens", 0) or 0),
+            cache_creation_ephemeral_5m_input_tokens=int(
+                data.get("cache_creation_ephemeral_5m_input_tokens", 0) or 0
+            ),
+            cache_creation_ephemeral_1h_input_tokens=int(
+                data.get("cache_creation_ephemeral_1h_input_tokens", 0) or 0
+            ),
         )
 
     def to_dict(self) -> dict[str, int]:
@@ -114,11 +141,115 @@ class TokenUsage:
             "output_tokens": self.output_tokens,
             "cache_creation_input_tokens": self.cache_creation_input_tokens,
             "cache_read_input_tokens": self.cache_read_input_tokens,
+            "cache_creation_ephemeral_5m_input_tokens": (
+                self.cache_creation_ephemeral_5m_input_tokens
+            ),
+            "cache_creation_ephemeral_1h_input_tokens": (
+                self.cache_creation_ephemeral_1h_input_tokens
+            ),
         }
 
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    @property
+    def processed_input_tokens(self) -> int:
+        return (
+            self.input_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
+        )
+
+    @property
+    def total_processed_tokens(self) -> int:
+        return self.processed_input_tokens + self.output_tokens
+
+
+@dataclass
+class AnalysisStats:
+    analysed_by_kind: dict[str, dict[str, int]] = field(default_factory=dict)
+    second_pass_by_kind: dict[str, dict[str, int]] = field(default_factory=dict)
+    digest_by_kind: dict[str, dict[str, int]] = field(default_factory=dict)
+
+    def _kind(self, paper: Paper) -> str:
+        if paper.record_kind in {"preprint", "published", "dataset"}:
+            return paper.record_kind
+        return "other"
+
+    def add_scored(self, paper: Paper, score: int) -> None:
+        kind = self._kind(paper)
+        self.analysed_by_kind.setdefault(kind, {})
+        score_key = str(score)
+        self.analysed_by_kind[kind][score_key] = (
+            self.analysed_by_kind[kind].get(score_key, 0) + 1
+        )
+
+    def add_second_pass(self, paper: Paper, score: int) -> None:
+        kind = self._kind(paper)
+        self.second_pass_by_kind.setdefault(kind, {})
+        score_key = str(score)
+        self.second_pass_by_kind[kind][score_key] = (
+            self.second_pass_by_kind[kind].get(score_key, 0) + 1
+        )
+
+    def add_digest(self, paper: Paper, score: int) -> None:
+        kind = self._kind(paper)
+        self.digest_by_kind.setdefault(kind, {})
+        score_key = str(score)
+        self.digest_by_kind[kind][score_key] = (
+            self.digest_by_kind[kind].get(score_key, 0) + 1
+        )
+
+    def add(self, other: "AnalysisStats") -> None:
+        for source, scores in other.analysed_by_kind.items():
+            bucket = self.analysed_by_kind.setdefault(source, {})
+            for score, count in scores.items():
+                bucket[score] = bucket.get(score, 0) + count
+        for source, scores in other.second_pass_by_kind.items():
+            bucket = self.second_pass_by_kind.setdefault(source, {})
+            for score, count in scores.items():
+                bucket[score] = bucket.get(score, 0) + count
+        for source, scores in other.digest_by_kind.items():
+            bucket = self.digest_by_kind.setdefault(source, {})
+            for score, count in scores.items():
+                bucket[score] = bucket.get(score, 0) + count
+
+    def total_analysed(self) -> int:
+        return sum(sum(scores.values()) for scores in self.analysed_by_kind.values())
+
+    def total_second_pass(self) -> int:
+        return sum(sum(scores.values()) for scores in self.second_pass_by_kind.values())
+
+    def total_digest(self) -> int:
+        return sum(sum(scores.values()) for scores in self.digest_by_kind.values())
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AnalysisStats":
+        analysed_by_kind = {
+            str(kind): {str(score): int(count) for score, count in (scores or {}).items()}
+            for kind, scores in (data.get("analysed_by_kind", {}) or {}).items()
+        }
+        second_pass_by_kind = {
+            str(kind): {str(score): int(count) for score, count in (scores or {}).items()}
+            for kind, scores in (data.get("second_pass_by_kind", {}) or {}).items()
+        }
+        digest_by_kind = {
+            str(kind): {str(score): int(count) for score, count in (scores or {}).items()}
+            for kind, scores in (data.get("digest_by_kind", {}) or {}).items()
+        }
+        return cls(
+            analysed_by_kind=analysed_by_kind,
+            second_pass_by_kind=second_pass_by_kind,
+            digest_by_kind=digest_by_kind,
+        )
+
+    def to_dict(self) -> dict[str, dict[str, dict[str, int]]]:
+        return {
+            "analysed_by_kind": self.analysed_by_kind,
+            "second_pass_by_kind": self.second_pass_by_kind,
+            "digest_by_kind": self.digest_by_kind,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +271,13 @@ def load_paper_cache(path: str = CACHE_FILE) -> dict[str, dict]:
 def save_paper_cache(cache: dict[str, dict], path: str = CACHE_FILE) -> None:
     """Persist the paper cache to disk."""
     try:
-        Path(path).write_text(json.dumps(cache, indent=2) + "\n")
+        migrated: dict[str, dict] = {}
+        for key, value in cache.items():
+            target_key = key
+            if ":" not in key:
+                target_key = f"arxiv:{key}"
+            migrated.setdefault(target_key, value)
+        Path(path).write_text(json.dumps(migrated, indent=2) + "\n")
     except OSError as e:
         logger.error("Failed to save paper cache: %s", e)
 
@@ -159,7 +296,12 @@ def _paper_to_cache(p: Paper) -> dict:
     if published.tzinfo is None:
         published = published.replace(tzinfo=timezone.utc)
     return {
-        "arxiv_id": p.arxiv_id,
+        "paper_id": p.paper_id,
+        "source": p.source,
+        "record_kind": p.record_kind,
+        "version_stage": p.version_stage,
+        "doi": p.doi,
+        "openalex_id": p.openalex_id,
         "title": p.title,
         "authors": p.authors,
         "abstract": p.abstract,
@@ -176,8 +318,14 @@ def _paper_from_cache(data: dict) -> Paper | None:
         published = datetime.fromisoformat(data["published"])
         if published.tzinfo is None:
             published = published.replace(tzinfo=timezone.utc)
+        source = str(data.get("source", "arxiv") or "arxiv")
         return Paper(
-            arxiv_id=str(data["arxiv_id"]),
+            paper_id=str(data.get("paper_id") or data.get("arxiv_id", "")),
+            source=source,
+            record_kind=str(data.get("record_kind", "preprint") or "preprint"),
+            version_stage=str(data.get("version_stage", "preprint") or "preprint"),
+            doi=str(data.get("doi")) if data.get("doi") else None,
+            openalex_id=str(data.get("openalex_id")) if data.get("openalex_id") else None,
             title=str(data["title"]),
             authors=list(data["authors"]),
             abstract=str(data.get("abstract", "")),
@@ -191,6 +339,92 @@ def _paper_from_cache(data: dict) -> Paper | None:
         return None
 
 
+def _cache_key(paper: Paper) -> str:
+    return f"{paper.source}:{paper.paper_id}"
+
+
+def _legacy_cache_key(paper: Paper) -> str | None:
+    if paper.source == "arxiv":
+        return paper.paper_id
+    return None
+
+
+def _lookup_cache_entry(cache: dict[str, dict], paper: Paper) -> tuple[str, dict | None]:
+    key = _cache_key(paper)
+    if key in cache:
+        return key, cache[key]
+    legacy_key = _legacy_cache_key(paper)
+    if legacy_key and legacy_key in cache:
+        return legacy_key, cache[legacy_key]
+    return key, None
+
+
+def _parse_cache_timestamp(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def build_analysis_stats(
+    window_start: datetime | None,
+    digest_papers: list["ScoredPaper"],
+    path: str = CACHE_FILE,
+) -> AnalysisStats:
+    """Build chart stats from cache entries plus the current digest set."""
+    cache = load_paper_cache(path)
+    stats = AnalysisStats()
+    counted_keys: set[str] = set()
+    digest_keys: set[str] = set()
+
+    for entry in cache.values():
+        score = entry.get("score")
+        if score is None:
+            continue
+        try:
+            score_value = int(score)
+        except (TypeError, ValueError):
+            continue
+
+        paper_data = entry.get("paper")
+        if not isinstance(paper_data, dict):
+            continue
+        paper = _paper_from_cache(paper_data)
+        if paper is None:
+            continue
+
+        analysed_at = _parse_cache_timestamp(entry.get("scored_at")) or paper.published
+        if window_start is not None and analysed_at < window_start:
+            continue
+
+        canonical_key = _cache_key(paper)
+        if canonical_key in counted_keys:
+            continue
+
+        stats.add_scored(paper, score_value)
+        if entry.get("summary") and entry.get("reason"):
+            stats.add_second_pass(paper, score_value)
+        counted_keys.add(canonical_key)
+
+    for scored in digest_papers:
+        key = _cache_key(scored.paper)
+        if key in digest_keys:
+            continue
+        digest_keys.add(key)
+        if key not in counted_keys:
+            stats.add_scored(scored.paper, scored.score)
+            stats.add_second_pass(scored.paper, scored.score)
+            counted_keys.add(key)
+        stats.add_digest(scored.paper, scored.score)
+
+    return stats
+
+
 def load_pending_scored_papers(
     threshold: int,
     path: str = CACHE_FILE,
@@ -198,6 +432,7 @@ def load_pending_scored_papers(
     """Load all cached papers that are ready to be emailed (emailed=false, above threshold, summary present)."""
     cache = load_paper_cache(path)
     pending: list[ScoredPaper] = []
+    seen_keys: set[str] = set()
     for entry in cache.values():
         if entry.get("emailed", False):
             continue
@@ -214,6 +449,10 @@ def load_pending_scored_papers(
         paper = _paper_from_cache(paper_data)
         if paper is None:
             continue
+        key = _cache_key(paper)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
         pending.append(
             ScoredPaper(
                 paper=paper,
@@ -227,17 +466,38 @@ def load_pending_scored_papers(
     return pending
 
 
-def mark_papers_emailed(arxiv_ids: list[str], path: str = CACHE_FILE) -> None:
+def mark_papers_emailed(paper_keys: list[str], path: str = CACHE_FILE) -> None:
     """Mark papers as emailed so they are excluded from future digests."""
     cache = load_paper_cache(path)
-    for aid in arxiv_ids:
-        if aid in cache:
-            cache[aid]["emailed"] = True
+    emailed_at = datetime.now(timezone.utc).isoformat()
+    for key in paper_keys:
+        if key in cache:
+            cache[key]["emailed"] = True
+            cache[key]["emailed_at"] = emailed_at
+        elif key.startswith("arxiv:"):
+            bare = key[len("arxiv:"):]
+            if bare in cache:
+                cache[bare]["emailed"] = True
+                cache[bare]["emailed_at"] = emailed_at
+            else:
+                cache[key] = {
+                    "score": None,
+                    "summary": None,
+                    "reason": None,
+                    "emailed": True,
+                    "emailed_at": emailed_at,
+                }
         else:
             # Paper was in a digest but not in cache — shouldn't happen, but handle gracefully
-            cache[aid] = {"score": None, "summary": None, "reason": None, "emailed": True}
+            cache[key] = {
+                "score": None,
+                "summary": None,
+                "reason": None,
+                "emailed": True,
+                "emailed_at": emailed_at,
+            }
     save_paper_cache(cache, path)
-    logger.info("Marked %d papers as emailed in cache", len(arxiv_ids))
+    logger.info("Marked %d papers as emailed in cache", len(paper_keys))
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +751,10 @@ def generate_digest_overview(
     return (overview or ""), usage
 
 
-def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPaper], TokenUsage]:
+def score_papers(
+    papers: list[Paper],
+    config: AppConfig,
+) -> tuple[list[ScoredPaper], TokenUsage, AnalysisStats]:
     """Score papers in two passes using Claude, with a persistent cache.
 
     Pass 0: Filter out already-emailed papers and split remaining into
@@ -504,19 +767,29 @@ def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPap
     Returns papers meeting the threshold, sorted by score descending.
     """
     if not papers:
-        return [], TokenUsage()
+        return [], TokenUsage(), AnalysisStats()
 
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
     sc = config.scoring
     interests = config.interests
     total_usage = TokenUsage()
+    analysis_stats = AnalysisStats()
+    newly_scored_keys: set[str] = set()
+    scored_at = datetime.now(timezone.utc).isoformat()
 
     # ------------------------------------------------------------------ #
     # Pre-filter: exclude emailed papers, split cached vs uncached        #
     # ------------------------------------------------------------------ #
     cache = load_paper_cache()
 
-    eligible = [p for p in papers if not cache.get(p.arxiv_id, {}).get("emailed", False)]
+    eligible: list[Paper] = []
+    cache_keys_by_paper: dict[str, str] = {}
+    for paper in papers:
+        actual_key, entry = _lookup_cache_entry(cache, paper)
+        cache_keys_by_paper[_cache_key(paper)] = actual_key
+        if entry and entry.get("emailed", False):
+            continue
+        eligible.append(paper)
     emailed_count = len(papers) - len(eligible)
     if emailed_count:
         logger.info("Skipping %d previously emailed papers", emailed_count)
@@ -524,9 +797,11 @@ def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPap
     needs_scoring: list[Paper] = []
     already_scored: list[Paper] = []
     for p in eligible:
-        if p.arxiv_id in cache:
+        actual_key, entry = _lookup_cache_entry(cache, p)
+        cache_keys_by_paper[_cache_key(p)] = actual_key
+        if entry is not None:
             # Backfill paper metadata for older cache entries.
-            cache[p.arxiv_id].setdefault("paper", _paper_to_cache(p))
+            entry.setdefault("paper", _paper_to_cache(p))
             already_scored.append(p)
         else:
             needs_scoring.append(p)
@@ -563,14 +838,20 @@ def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPap
 
             for local_idx, score in _parse_scores(text, len(batch)).items():
                 paper_scores[batch_start + local_idx] = score
+                analysis_stats.add_scored(needs_scoring[batch_start + local_idx], score)
                 # Cache the score immediately (summary added in pass 2 if above threshold)
-                cache[needs_scoring[batch_start + local_idx].arxiv_id] = {
+                paper = needs_scoring[batch_start + local_idx]
+                key = _cache_key(paper)
+                cache[key] = {
                     "score": score,
                     "summary": None,
                     "reason": None,
                     "emailed": False,
-                    "paper": _paper_to_cache(needs_scoring[batch_start + local_idx]),
+                    "scored_at": scored_at,
+                    "paper": _paper_to_cache(paper),
                 }
+                cache_keys_by_paper[key] = key
+                newly_scored_keys.add(key)
 
             if len(score_batches) > 1:
                 time.sleep(0.5)
@@ -590,7 +871,7 @@ def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPap
 
     # Cache hits
     for p in already_scored:
-        entry = cache[p.arxiv_id]
+        entry = cache[cache_keys_by_paper[_cache_key(p)]]
         score = entry["score"]
         if score is not None and score >= sc.threshold:
             if entry.get("summary"):
@@ -650,8 +931,12 @@ def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPap
             logger.warning("No summary generated for '%s', skipping", paper.title)
             continue
         summary, reason = summaries[i]
-        cache[paper.arxiv_id]["summary"] = summary
-        cache[paper.arxiv_id]["reason"] = reason
+        cache_key = cache_keys_by_paper.get(_cache_key(paper), _cache_key(paper))
+        cache[cache_key]["summary"] = summary
+        cache[cache_key]["reason"] = reason
+        cache[cache_key]["summary_generated_at"] = datetime.now(timezone.utc).isoformat()
+        if cache_key in newly_scored_keys:
+            analysis_stats.add_second_pass(paper, score)
         results.append(ScoredPaper(
             paper=paper,
             score=score,
@@ -675,4 +960,4 @@ def score_papers(papers: list[Paper], config: AppConfig) -> tuple[list[ScoredPap
         "Pass 2 complete: %d papers with summaries returned",
         len(results),
     )
-    return results, total_usage
+    return results, total_usage, analysis_stats

@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 
 from src.config import SmtpConfig
 
-logger = logging.getLogger("arXivAlert.mailer")
+logger = logging.getLogger("paperpress.mailer")
 
 
 def _get_logo_path() -> Path:
@@ -38,7 +38,7 @@ def send_digest(
     # multipart/related -> multipart/alternative -> (text/plain, text/html)
     # plus inline assets (logo).
     msg = MIMEMultipart("related")
-    msg["Subject"] = f"[arXivAlert] Digest: {start_str} to {end_str}"
+    msg["Subject"] = f"[Paper Press] Digest: {start_str} to {end_str}"
     msg["From"] = smtp_config.user
     msg["To"] = smtp_config.recipient
 

@@ -30,7 +30,12 @@ def fetch_rates(timeout_s: float = 3.0) -> FxRates:
     """
     url = "https://api.frankfurter.app/latest"
     try:
-        r = httpx.get(url, params={"from": "USD", "to": "GBP,EUR"}, timeout=timeout_s)
+        r = httpx.get(
+            url,
+            params={"from": "USD", "to": "GBP,EUR"},
+            timeout=timeout_s,
+            follow_redirects=True,
+        )
         r.raise_for_status()
         data = r.json()
         rates = data.get("rates") or {}
@@ -44,4 +49,3 @@ def fetch_rates(timeout_s: float = 3.0) -> FxRates:
 
 def convert_usd(usd: float, rates: FxRates) -> tuple[float, float, float]:
     return (usd * rates.usd_to_gbp, usd * rates.usd_to_eur, usd)
-

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.scorer import TokenUsage
+from src.scorer import AnalysisStats, TokenUsage
 
 
 STATE_FILE = "token_usage.json"
@@ -18,6 +18,7 @@ class UsageState:
     window_start: datetime | None = None
     usage_by_model: dict[str, TokenUsage] = field(default_factory=dict)
     total_scanned: int = 0
+    analysis_stats: AnalysisStats = field(default_factory=AnalysisStats)
     overview_key: str = ""
     overview_text: str = ""
 
@@ -60,6 +61,7 @@ def load_usage_state(path: str = STATE_FILE) -> UsageState:
         window_start=window_start,
         usage_by_model=usage_by_model,
         total_scanned=int(raw.get("total_scanned", 0) or 0),
+        analysis_stats=AnalysisStats.from_dict(raw.get("analysis_stats", {}) or {}),
         overview_key=str(raw.get("overview_key", "") or ""),
         overview_text=str(raw.get("overview_text", "") or ""),
     )
@@ -70,6 +72,7 @@ def save_usage_state(state: UsageState, path: str = STATE_FILE) -> None:
         "window_start": state.window_start.isoformat() if state.window_start else "",
         "usage_by_model": {m: u.to_dict() for m, u in state.usage_by_model.items()},
         "total_scanned": state.total_scanned,
+        "analysis_stats": state.analysis_stats.to_dict(),
         "overview_key": state.overview_key,
         "overview_text": state.overview_text,
     }

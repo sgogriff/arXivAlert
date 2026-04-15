@@ -1,15 +1,12 @@
-"""arXiv API interaction — fetches papers and manages date-range state."""
+"""Shared paper model and run-state helpers."""
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import arxiv
-
-logger = logging.getLogger("arXivAlert.fetcher")
+logger = logging.getLogger("paperpress.fetcher")
 
 _INITIAL_SEARCH_WINDOW_LOOKBACK = {
     "daily": timedelta(days=1),
@@ -21,7 +18,12 @@ _INITIAL_SEARCH_WINDOW_LOOKBACK = {
 
 @dataclass
 class Paper:
-    arxiv_id: str
+    paper_id: str
+    source: str
+    record_kind: str
+    version_stage: str
+    doi: str | None
+    openalex_id: str | None
     title: str
     authors: list[str]
     abstract: str
@@ -69,71 +71,3 @@ def calculate_date_range(
         )
         start = now - lookback
     return (start, now)
-
-
-def _extract_arxiv_id(entry_id: str) -> str:
-    """Extract clean arXiv ID from full entry URL.
-
-    e.g. 'http://arxiv.org/abs/2401.12345v1' -> '2401.12345'
-    """
-    match = re.search(r"(\d{4}\.\d{4,5})", entry_id)
-    return match.group(1) if match else entry_id
-
-
-def fetch_papers(
-    categories: list[str],
-    max_results: int,
-    date_range: tuple[datetime, datetime],
-) -> list[Paper]:
-    """Fetch papers from arXiv for the given categories within date_range.
-
-    Queries each category, deduplicates by arXiv ID, and filters by date.
-    """
-    start_date, end_date = date_range
-    seen: dict[str, Paper] = {}
-    # The arxiv library uses Client.page_size as the per-request "max_results" query parameter.
-    # Use the configured max_results so we don't silently cap to 100 in the first request.
-    page_size = max(1, min(int(max_results), 300))
-    client = arxiv.Client(page_size=page_size, delay_seconds=3.0, num_retries=3)
-
-    for category in categories:
-        logger.info("Fetching category: %s", category)
-        search = arxiv.Search(
-            query=f"cat:{category}",
-            max_results=max_results,
-            sort_by=arxiv.SortCriterion.SubmittedDate,
-            sort_order=arxiv.SortOrder.Descending,
-        )
-
-        for result in client.results(search):
-            # Make published timezone-aware if it isn't
-            pub = result.published
-            if pub.tzinfo is None:
-                pub = pub.replace(tzinfo=timezone.utc)
-
-            # Early termination — results are sorted newest first
-            if pub < start_date:
-                break
-
-            if pub > end_date:
-                continue
-
-            aid = _extract_arxiv_id(result.entry_id)
-            if aid in seen:
-                continue
-
-            seen[aid] = Paper(
-                arxiv_id=aid,
-                title=result.title.replace("\n", " ").strip(),
-                authors=[a.name for a in result.authors],
-                abstract=result.summary.replace("\n", " ").strip(),
-                categories=result.categories,
-                primary_category=result.primary_category,
-                published=pub,
-                pdf_url=result.pdf_url,
-                abs_url=result.entry_id,
-            )
-
-    papers = sorted(seen.values(), key=lambda p: p.published, reverse=True)
-    logger.info("Fetched %d unique papers across %d categories", len(papers), len(categories))
-    return papers

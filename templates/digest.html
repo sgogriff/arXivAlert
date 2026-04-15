@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>arXivAlert Digest</title>
+  <title>Paper Press Digest</title>
 </head>
 	<body style="margin: 0; padding: 0; background-color: #f3f4f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
 	  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f8;">
@@ -28,15 +28,26 @@
 	                {{ digest_overview if digest_overview else "Claude overview unavailable for this run." }}
 	              </p>
 	              <p style="margin: 10px 0 0; font-size: 12px; color: #666;">
-	                Token usage: <strong>{{ "{:,}".format(token_usage.input_tokens) }}</strong> in /
-	                <strong>{{ "{:,}".format(token_usage.output_tokens) }}</strong> out
-	                (total <strong>{{ "{:,}".format(token_usage.total_tokens) }}</strong>)
+	                Token usage: <strong>{{ "{:,}".format(token_usage.input_tokens) }}</strong> base input /
+	                <strong>{{ "{:,}".format(token_usage.output_tokens) }}</strong> output
+	                {% if token_usage.cache_creation_input_tokens or token_usage.cache_read_input_tokens %}
+	                  — cache writes <strong>{{ "{:,}".format(token_usage.cache_creation_input_tokens) }}</strong>,
+	                  cache reads <strong>{{ "{:,}".format(token_usage.cache_read_input_tokens) }}</strong>
+	                {% endif %}
+	                — processed total <strong>{{ "{:,}".format(token_usage.total_processed_tokens) }}</strong>
 	                {% if cost_gbp is not none and cost_eur is not none and cost_usd is not none %}
-	                  — approx. <strong>£{{ "%.4f"|format(cost_gbp) }}</strong> /
+	                  — price estimate <strong>£{{ "%.4f"|format(cost_gbp) }}</strong> /
 	                  <strong>€{{ "%.4f"|format(cost_eur) }}</strong> /
-	                  <strong>${{ "%.4f"|format(cost_usd) }}</strong>
+	                  <strong>${{ "%.4f"|format(cost_usd) }}</strong>.
+	                  For billed totals, check the
+	                  <a href="https://console.anthropic.com/" style="color: #4f46e5; text-decoration: none;">Anthropic Console</a>
+	                  usage and billing pages, or the
+	                  <a href="https://docs.anthropic.com/en/api/usage-cost-api" style="color: #4f46e5; text-decoration: none;">Usage &amp; Cost API</a>.
 	                {% else %}
-	                  — approx. cost unavailable
+	                  — price estimate unavailable. For billed totals, check the
+	                  <a href="https://console.anthropic.com/" style="color: #4f46e5; text-decoration: none;">Anthropic Console</a>
+	                  usage and billing pages, or the
+	                  <a href="https://docs.anthropic.com/en/api/usage-cost-api" style="color: #4f46e5; text-decoration: none;">Usage &amp; Cost API</a>.
 	                {% endif %}
 	              </p>
 	            </td>
@@ -80,7 +91,9 @@
 
                     <!-- Authors -->
                     <p style="margin: 6px 0 0; font-size: 13px; color: #777;">
-                      {% if item.paper.authors | length > 3 %}
+                      {% if item.paper.authors | length == 0 %}
+                        Authors unavailable
+                      {% elif item.paper.authors | length > 3 %}
                         {{ item.paper.authors[:3] | join(', ') }} et al.
                       {% else %}
                         {{ item.paper.authors | join(', ') }}
@@ -89,6 +102,8 @@
 
 	                    <!-- Categories -->
 	                    <p style="margin: 6px 0 0;">
+                        <span style="display: inline-block; background:#e0f2fe; color:#0369a1; font-size:10px; padding:2px 7px; border-radius:999px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-right: 6px;">{{ item.paper.source }}</span>
+                        <span style="display: inline-block; background:#ecfccb; color:#3f6212; font-size:10px; padding:2px 7px; border-radius:999px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-right: 6px;">{{ item.paper.record_kind }}</span>
 	                      {% for cat in item.paper.categories[:4] %}
 	                      <span style="display: inline-block; background-color: #eef2ff; color: #3730a3; font-size: 11px; padding: 2px 8px; border-radius: 999px; margin-right: 6px;">{{ cat }}</span>
 	                      {% endfor %}
@@ -116,11 +131,32 @@
 	          </tr>
           {% endfor %}
 
+          {% if analysis_chart.has_data %}
+	          <tr>
+	            <td style="padding: 20px 32px; background-color: #f8fafc; border-top: 1px solid #e5e7eb;">
+                  <p style="margin: 0 0 6px; font-size: 14px; color: #111827; font-weight: 700;">
+                    Analysis Distribution
+                  </p>
+                  <p style="margin: 0 0 16px; font-size: 12px; color: #6b7280; line-height: 1.5;">
+                    {{ analysis_chart.total_analysed }} papers analysed in this accumulation window.
+                    {{ analysis_chart.total_second_pass }} completed pass 2 and {{ analysis_chart.total_digest }}
+                    {{ 'was' if analysis_chart.total_digest == 1 else 'were' }} included in this digest.
+                  </p>
+                  {% if analysis_chart.chart_image %}
+                  <img src="{{ analysis_chart.chart_image }}" alt="Analysis distribution chart" style="display: block; max-width: 100%; width: 100%; height: auto; margin: 0 0 14px;">
+                  {% endif %}
+                  <p style="margin: 0; font-size: 11px; color: #64748b; line-height: 1.5;">
+                    The chart shows papers included in this digest, grouped by relevance score and source. The dashed line marks the pass 2 threshold ({{ analysis_chart.threshold }}/10). Papers below this threshold did not make the final selection.
+                  </p>
+	            </td>
+	          </tr>
+          {% endif %}
+
           <!-- Footer -->
 	          <tr>
 	            <td style="padding: 18px 32px; background-color: #fbfbfe; text-align: center;">
 	              <p style="margin: 0; font-size: 12px; color: #999;">
-	                Generated by <strong>arXivAlert</strong> on {{ generation_date.strftime('%d %b %Y at %H:%M UTC') }}
+	                Generated by <strong>Paper Press</strong> on {{ generation_date.strftime('%d %b %Y at %H:%M UTC') }}
 	              </p>
 	            </td>
 	          </tr>
